@@ -124,7 +124,7 @@ namespace UncreatedDeaths
             }
             finally
             {
-                Logger.Log("Unloaded Death Messages.");
+                Logger.Log("Unloaded UncreatedDeaths");
             }
             base.Unload();
         }
