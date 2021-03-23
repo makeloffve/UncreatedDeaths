@@ -1,9 +1,4 @@
 ﻿using Rocket.API;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace UncreatedDeaths
 {
@@ -11,12 +6,14 @@ namespace UncreatedDeaths
     {
         public string RelativeConfigPathToRocketFolder;
         public string ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath;
-        public bool UseDifferentMessagesForGunIDs;
+        public bool LogDeathMessages;
+        public bool DisableVanillaUnturnedDeathLogging;
         public void LoadDefaults()
         {
-            RelativeConfigPathToRocketFolder = @"\UncreatedDeaths";
+            RelativeConfigPathToRocketFolder = @"\Plugins\UncreatedDeaths";
             ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath = "#ffffff";
-            UseDifferentMessagesForGunIDs = true;
+            LogDeathMessages = false;
+            DisableVanillaUnturnedDeathLogging = false;
         }
     }
 }

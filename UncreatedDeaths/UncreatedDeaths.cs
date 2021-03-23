@@ -1,29 +1,26 @@
 ﻿using Rocket.API;
-using Rocket.Core;
 using Rocket.Core.Logging;
 using Rocket.Core.Plugins;
-using Rocket.Unturned;
-using Rocket.Unturned.Chat;
 using Rocket.Unturned.Player;
 using SDG.Unturned;
 using Steamworks;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace UncreatedDeaths
 {
     public class Deaths : RocketPlugin<Config>
     {
-        public const string translationDescription = "Translations | Key, space, value with unlimited spaces. Formatting: Dead player name, Murderer name when applicable, Limb, Gun name when applicable, distance when applicable.";
+        public const string translationDescription = "Translations | Key, space, value with unlimited spaces. Formatting: Dead player name, Murderer name when applicable, Limb, Gun name when applicable, distance when applicable. /deathreload to reload";
+        public const string limbsDescriptionTransl = "Translations | Key, space, value with unlimited spaces. Must match SDG.Unturned.ELimb enumerator list <LEFT|RIGHT>_<ARM|LEG|BACK|FOOT|FRONT|HAND>, SPINE, SKULL. ex. LEFT_ARM, RIGHT_FOOT";
         public string translationname { get { return System.IO.Directory.GetCurrentDirectory() + Configuration.Instance.RelativeConfigPathToRocketFolder + @"\translations.txt"; } }
+        public string limbtranslationname { get { return System.IO.Directory.GetCurrentDirectory() + Configuration.Instance.RelativeConfigPathToRocketFolder + @"\limbs_translations.txt"; } }
         public static Deaths Instance;
         public Dictionary<string, string> translations = new Dictionary<string, string>();
         readonly Dictionary<string, string> DefTranslations = new Dictionary<string, string> {
-            { "ACID", "{0} was burned by acid." },
+            { "ACID", "{0} was burned by an acid zombie." },
             { "ANIMAL", "{0} was attacked by an animal." },
             { "ARENA", "{0} stepped outside the arena boundary." },
             { "BLEEDING", "{0} bled out from {1}." },
@@ -66,9 +63,11 @@ namespace UncreatedDeaths
             { "SUICIDE", "{0} committed suicide." },
             { "VEHICLE", "{0} was killed by a vehicle." },
             { "WATER", "{0} dehydrated." },
-            { "ZOMBIE", "{0} was killed by a zombie." }
+            { "ZOMBIE", "{0} was killed by a zombie." },
+            { "1394", "{0} was shot by {1} in the {2} from a {3} from {4} away." } //HMG
         };
-        readonly Dictionary<ELimb, string> NiceLimbs = new Dictionary<ELimb, string> {
+        public Dictionary<ELimb, string> NiceLimbs = new Dictionary<ELimb, string>();
+        public readonly Dictionary<ELimb, string> NiceLimbsDef = new Dictionary<ELimb, string> {
             { ELimb.LEFT_ARM, "Left Arm" },
             { ELimb.LEFT_BACK, "Left Back" },
             { ELimb.LEFT_FOOT, "Left Foot" },
@@ -88,11 +87,11 @@ namespace UncreatedDeaths
         {
             Instance = this;
             if(!System.IO.Directory.Exists(System.IO.Directory.GetCurrentDirectory() + Configuration.Instance.RelativeConfigPathToRocketFolder))
-            {
                 System.IO.Directory.CreateDirectory(System.IO.Directory.GetCurrentDirectory() + Configuration.Instance.RelativeConfigPathToRocketFolder);
-            }
+            if(Configuration.Instance.DisableVanillaUnturnedDeathLogging)
+                CommandWindow.shouldLogDeaths = false;
             Logger.Log("UncreatedDeaths by BlazingFlame#0001 loaded, attempting to read translations.");
-            R.Plugins.OnPluginsLoaded += Plugins_OnPluginsLoaded;
+            Rocket.Unturned.Events.UnturnedPlayerEvents.OnPlayerDeath += UnturnedPlayerEvents_OnPlayerDeath;
             CheckForFileAndLoadDefault();
             base.Load();
         }
@@ -114,23 +113,34 @@ namespace UncreatedDeaths
                 Logger.Log("Translations found, attempting to load.");
                 LoadTranslations();
             }
+
+            if (!File.Exists(limbtranslationname))
+            {
+                Logger.Log("Creating limb translations file and adding default messages.");
+                using (FileStream stream = File.Open(limbtranslationname, FileMode.OpenOrCreate, FileAccess.Write))
+                {
+                    MakeLimbFile(stream);
+                    stream.Close();
+                    stream.Dispose();
+                }
+                NiceLimbs = NiceLimbsDef;
+            }
+            else
+            {
+                Logger.Log("Limb Translations found, attempting to load.");
+                LoadLimbTranslations();
+            }
         }
         protected override void Unload()
         {
-            R.Plugins.OnPluginsLoaded -= Plugins_OnPluginsLoaded;
-            try
+            Rocket.Unturned.Events.UnturnedPlayerEvents.OnPlayerDeath -= UnturnedPlayerEvents_OnPlayerDeath;
+            if (CommandWindow.shouldLogDeaths == false && Configuration.Instance.DisableVanillaUnturnedDeathLogging)
             {
-                Rocket.Unturned.Events.UnturnedPlayerEvents.OnPlayerDeath -= UnturnedPlayerEvents_OnPlayerDeath;
+                CommandWindow.shouldLogDeaths = true;
+                Logger.Log("Re-enabled vanilla death logs, unloading.");
             }
-            finally
-            {
-                Logger.Log("Unloaded UncreatedDeaths");
-            }
+            Logger.Log("Unloaded UncreatedDeaths");
             base.Unload();
-        }
-        private void Plugins_OnPluginsLoaded()
-        {
-            Rocket.Unturned.Events.UnturnedPlayerEvents.OnPlayerDeath += UnturnedPlayerEvents_OnPlayerDeath;
         }
         private void UnturnedPlayerEvents_OnPlayerDeath(UnturnedPlayer player, EDeathCause cause, ELimb limb, CSteamID murderer)
         {
@@ -140,8 +150,7 @@ namespace UncreatedDeaths
             {
                 murdererPlayer = UnturnedPlayer.FromCSteamID(murderer);
                 MurdererName = murdererPlayer.DisplayName;
-            }
-            catch (Exception ex) { Logger.Log(ex); Logger.Log(murderer.m_SteamID.ToString()); Logger.Log(Provider.server.m_SteamID.ToString()); }
+            } catch { }
             string key = cause.ToString();
             string HeldGun = murdererPlayer.GetHeldGunName(MurdererName);
             ushort heldGunID = murdererPlayer.GetHeldGunID(MurdererName);
@@ -153,7 +162,7 @@ namespace UncreatedDeaths
                     distance = UnityEngine.Vector3.Distance(player.Position, murdererPlayer.Position);
                 } catch { }
             }
-            if (player.CSteamID == murderer)
+            if (player.CSteamID == murderer && cause != EDeathCause.SUICIDE)
             {
                 key += "_SUICIDE";
             }
@@ -164,8 +173,9 @@ namespace UncreatedDeaths
                     string message = translations[heldGunID.ToString()];
                     try
                     {
-                        ChatManager.say(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                        Logger.Log(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                        ChatManager.say(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
+                            LogDeath(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"));
+                        
                     }
                     catch
                     {
@@ -177,8 +187,8 @@ namespace UncreatedDeaths
                             message = translations[key];
                             try
                             {
-                                ChatManager.say(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                                Logger.Log(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                                ChatManager.say(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
+                                    LogDeath(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"));
                             }
                             catch
                             {
@@ -186,13 +196,13 @@ namespace UncreatedDeaths
                                 if (DefTranslations.ContainsKey(key))
                                 {
                                     message = DefTranslations[key];
-                                    ChatManager.say(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                                    Logger.Log(string.Format(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m")));
+                                    ChatManager.say(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
+                                        LogDeath(string.Format(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m")));
                                 }
                                 else
                                 {
                                     ChatManager.say(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {distance.ToString() + "m"})", Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                                    Logger.Log(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                                        LogDeath(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {distance.ToString() + "m"})");
                                 }
                             }
                         }
@@ -207,8 +217,8 @@ namespace UncreatedDeaths
                         string message = translations[key];
                         try
                         {
-                            ChatManager.say(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                            Logger.Log(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                            ChatManager.say(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
+                                LogDeath(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"));
                         } 
                         catch
                         {
@@ -216,13 +226,13 @@ namespace UncreatedDeaths
                             if (DefTranslations.ContainsKey(key))
                             {
                                 message = DefTranslations[key];
-                                ChatManager.say(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                                Logger.Log(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                                ChatManager.say(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
+                                    LogDeath(String.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"));
                             }
                             else
                             {
                                 ChatManager.say(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {distance.ToString() + "m"})", Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                                Logger.Log(String.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                                    LogDeath(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {distance.ToString() + "m"})");
                             }
                         }
                     }
@@ -241,21 +251,21 @@ namespace UncreatedDeaths
                     string message = translations[key];
                     try
                     {
-                        ChatManager.say(string.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                        Logger.Log(string.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                        ChatManager.say(string.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
+                            LogDeath(string.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"));
                     } catch
                     {
                         Logger.Log(message + " is too long, sending default message instead.");
                         if (DefTranslations.ContainsKey(key))
                         {
                             message = DefTranslations[key];
-                            ChatManager.say(string.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                            Logger.Log(string.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                            ChatManager.say(string.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
+                                LogDeath(string.Format(message, player.DisplayName, MurdererName, limb.GetLimbName(), HeldGun, Math.Round(distance).ToString() + "m"));
                         }
                         else
                         {
                             ChatManager.say(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {Math.Round(distance).ToString() + "m"})", Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                            Logger.Log(string.Format(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {Math.Round(distance).ToString() + "m"})", player.DisplayName, MurdererName, NiceLimbs[limb]));
+                            LogDeath(string.Format(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {Math.Round(distance).ToString() + "m"})", player.DisplayName, MurdererName, NiceLimbs[limb]));
                         }
                     }
                 } else
@@ -264,12 +274,12 @@ namespace UncreatedDeaths
                     {
                         string message = DefTranslations[key];
                         ChatManager.say(string.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"), Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                        Logger.Log(string.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
+                        LogDeath(string.Format(message, player.DisplayName, MurdererName, NiceLimbs[limb], HeldGun, Math.Round(distance).ToString() + "m"));
                     }
                     else
                     {
                         ChatManager.say(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {Math.Round(distance).ToString() + "m"})", Configuration.Instance.ColorOfTheTextToSendWhenTextIsSentAfterAPlayerDiesOrGetsShotToDeath.Hex());
-                        Logger.Log(string.Format(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {Math.Round(distance).ToString() + "m"})", player.DisplayName, MurdererName, NiceLimbs[limb]));
+                        LogDeath(string.Format(key + $" ({player.DisplayName}, {murderer.m_SteamID}, {limb}, {HeldGun}, {Math.Round(distance).ToString() + "m"})", player.DisplayName, MurdererName, NiceLimbs[limb]));
                     }
                 }
             }
@@ -277,6 +287,42 @@ namespace UncreatedDeaths
         public void LoadTranslations()
         {
             translations = LoadTLFromString(File.ReadAllText(translationname));
+        }
+        public void LoadLimbTranslations()
+        {
+            NiceLimbs = LoadLimbTLFromString(File.ReadAllText(limbtranslationname));
+        }
+        private void LogDeath(string text)
+        {
+            if (Instance.Configuration.Instance.LogDeathMessages)
+            {
+                CommandWindow.Log(text);
+            }
+        }
+        private Dictionary<ELimb, string> LoadLimbTLFromString(string s)
+        {
+            StringReader reader = new StringReader(s);
+            Dictionary<ELimb, string> rtn = new Dictionary<ELimb, string>();
+            while (true)
+            {
+                string p = reader.ReadLine();
+                if (p == null)
+                    break;
+                if (p != Deaths.limbsDescriptionTransl)
+                {
+                    string[] data = p.Split(' ');
+                    if (data.Length > 1)
+                    {
+                        if(Enum.TryParse(data[0], out ELimb result))
+                            rtn.Add(result, data.ConcatStringArray(1, data.Length - 1));
+                        else
+                            Logger.Log("Invalid line, must match SDG.Unturned.ELimb enumerator list (LEFT|RIGHT)_(ARM|LEG|BACK|FOOT|FRONT|HAND), SPINE, SKULL. Line:\n" + p);
+                    }
+                    else
+                        Logger.Log("Error parsing limb\n" + p);
+                }
+            }
+            return rtn;
         }
         private Dictionary<string, string> LoadTLFromString(string s)
         {
@@ -293,15 +339,15 @@ namespace UncreatedDeaths
                     if (data.Length > 1)
                         rtn.Add(data[0], data.ConcatStringArray(1, data.Length - 1));
                     else
-                        Logger.Log("Error parsing\n" + p);
+                        Logger.Log("Error parsing translation\n" + p);
                 }
             }
             return rtn;
         }
         private void MakeTranslationFile(FileStream stream)
         {
-            byte[] bytes = Encoding.UTF8.GetBytes(translationDescription + '\n');
-            stream.Write(bytes, 0, bytes.Length);
+            byte[] bytesTransl = Encoding.UTF8.GetBytes(translationDescription + '\n');
+            stream.Write(bytesTransl, 0, bytesTransl.Length);
             foreach (string Key in DefTranslations.Keys)
             {
                 byte[] Keybytes = Encoding.UTF8.GetBytes(Key);
@@ -309,23 +355,28 @@ namespace UncreatedDeaths
                 byte[] ValueBytes = Encoding.UTF8.GetBytes(' ' + DefTranslations[Key] + '\n');
                 stream.Write(ValueBytes, 0, ValueBytes.Length);
             }
-
+        }
+        private void MakeLimbFile(FileStream stream)
+        {
+            byte[] bytesLimbs = Encoding.UTF8.GetBytes(limbsDescriptionTransl + '\n');
+            stream.Write(bytesLimbs, 0, bytesLimbs.Length);
+            foreach (ELimb Key in NiceLimbsDef.Keys)
+            {
+                byte[] Keybytes = Encoding.UTF8.GetBytes(Key.ToString());
+                stream.Write(Keybytes, 0, Keybytes.Length);
+                byte[] ValueBytes = Encoding.UTF8.GetBytes(' ' + NiceLimbsDef[Key] + '\n');
+                stream.Write(ValueBytes, 0, ValueBytes.Length);
+            }
         }
     }
     public class DeathReloadCommand : IRocketCommand
     {
         public AllowedCaller AllowedCaller => AllowedCaller.Both;
-
         public string Name => "deathreload";
-
         public string Help => "Reloads translations for plugin without fully reloading it.";
-
         public string Syntax => "deathreload";
-
         public List<string> Aliases => new List<string>();
-
         public List<string> Permissions => new List<string> { "ud.reload" };
-
         public void Execute(IRocketPlayer caller, string[] command)
         {
             Deaths.Instance.CheckForFileAndLoadDefault();
@@ -340,6 +391,17 @@ namespace UncreatedDeaths
     }
     public static class EXT
     {
+        public static string GetLimbName(this ELimb limb)
+        {
+            if (Deaths.Instance.NiceLimbs.ContainsKey(limb))
+            {
+                return Deaths.Instance.NiceLimbs[limb];
+            }
+            else
+            {
+                return Deaths.Instance.NiceLimbsDef[limb];
+            }
+        }
         public static string ConcatStringArray(this string[] array, int StartIndex, int EndIndex, char deliminator = ' ')
         {
             string rtn = string.Empty;
@@ -371,6 +433,18 @@ namespace UncreatedDeaths
             else
             {
                 ushort HeldItem = player.Player.equipment.itemID;
+                if(HeldItem == 1394 && player.IsInVehicle) //HMG
+                {
+                    VehicleAsset vAsset = null;
+                    try
+                    {
+                        vAsset = (VehicleAsset)Assets.find(EAssetType.VEHICLE, player.CurrentVehicle.name);
+                        if (vAsset != null)
+                            return vAsset.vehicleName;
+                    } catch
+                    {
+                    }
+                }
                 ItemAsset asset = null;
                 try
                 {
