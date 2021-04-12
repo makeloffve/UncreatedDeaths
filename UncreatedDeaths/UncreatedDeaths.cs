@@ -64,6 +64,7 @@ namespace UncreatedDeaths
             { "VEHICLE", "{0} was killed by a vehicle." },
             { "WATER", "{0} dehydrated." },
             { "ZOMBIE", "{0} was killed by a zombie." },
+            { "MAINCAMP", "{0} tried to main-camp {1} from {2} away and died." },
             { "1394", "{0} was shot by {1} in the {2} from a {3} from {4} away." } //HMG
         };
         public Dictionary<ELimb, string> NiceLimbs = new Dictionary<ELimb, string>();
@@ -83,6 +84,7 @@ namespace UncreatedDeaths
             { ELimb.SKULL, "Head" },
             { ELimb.SPINE, "Spine" }
         };
+        public EDeathCause OverridedCauseForMainCamping = EDeathCause.ARENA;
         protected override void Load()
         {
             Instance = this;
@@ -93,6 +95,10 @@ namespace UncreatedDeaths
             Logger.Log("UncreatedDeaths by BlazingFlame#0001 loaded, attempting to read translations.");
             Rocket.Unturned.Events.UnturnedPlayerEvents.OnPlayerDeath += UnturnedPlayerEvents_OnPlayerDeath;
             CheckForFileAndLoadDefault();
+            if (Configuration.Instance.EnableUncreatedMainCampingOverride)
+                if (!Enum.TryParse(Configuration.Instance.MainCampingDeathEnum.ToUpper(), out OverridedCauseForMainCamping))
+                    Logger.LogError($"Couldn't parse {Configuration.Instance.MainCampingDeathEnum.ToUpper()} to EDeathCause. " +
+                        $"Check the keys in the translations file for a list of them all. (Besides MAINCAMP if it's there)");
             base.Load();
         }
         public void CheckForFileAndLoadDefault()
@@ -166,6 +172,10 @@ namespace UncreatedDeaths
             {
                 key += "_SUICIDE";
             }
+            if(Configuration.Instance.EnableUncreatedMainCampingOverride && cause == OverridedCauseForMainCamping && translations.ContainsKey(Configuration.Instance.MainCampingKey))
+            {
+                key = Configuration.Instance.MainCampingKey;
+            }
             if ((cause == EDeathCause.GUN || cause == EDeathCause.MELEE || cause == EDeathCause.MISSILE || cause == EDeathCause.SPLASH) && MurdererName != "Unapplicable")
             {
                 if (translations.ContainsKey(heldGunID.ToString()))
@@ -210,7 +220,7 @@ namespace UncreatedDeaths
 
                 } else
                 {
-                    if (heldGunID == 0)
+                    if (heldGunID == 0 && key != Configuration.Instance.MainCampingKey)
                         key += "_UNKNOWN";
                     if (translations.ContainsKey(key))
                     {
