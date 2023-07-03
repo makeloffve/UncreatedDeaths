@@ -380,11 +380,11 @@ namespace UncreatedDeaths
         }
         public string WrapperVicitm(string name)
         {
-            return $"<color={Deaths.Instance.Configuration.Instance.ColorOfVicitm.Hex()}>{name}</color>";
+            return $"<color={Deaths.Instance.Configuration.Instance.ColorOfVicitm}>{name}</color>";
         }
         public string WrapperMurder(string name)
         {
-            return $"<color={Deaths.Instance.Configuration.Instance.ColorOfMuder.Hex()}>{name}</color>";
+            return $"<color={Deaths.Instance.Configuration.Instance.ColorOfMuder}>{name}</color>";
         }
     }
     public class DeathReloadCommand : IRocketCommand
